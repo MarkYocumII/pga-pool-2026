@@ -63,6 +63,7 @@ ALIASES = {
     "jacob bridgemen": "jacob bridgeman",
     "denny mcarthy": "denny mccarthy",
     "michael katrude": "michael kartrude",
+    "dan brown": "daniel brown",
 }
 
 def resolve_name(name):
