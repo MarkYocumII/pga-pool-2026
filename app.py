@@ -249,8 +249,19 @@ def fetch_leaderboard():
             thru = None
             tee_time_str = ""
             linescores = comp.get("linescores", [])
+
+            # Find the active round (last round with actual holes played)
+            current_round = None
             if linescores:
-                current_round = linescores[-1]
+                for rd in reversed(linescores):
+                    if rd.get("linescores", []):
+                        current_round = rd
+                        break
+                if current_round is None:
+                    # No holes played yet — use first round for tee time
+                    current_round = linescores[0]
+
+            if current_round:
                 hole_scores = current_round.get("linescores", [])
                 if hole_scores:
                     thru = min(len(hole_scores), 18)
@@ -275,9 +286,8 @@ def fetch_leaderboard():
                                     pass
 
             today = tee_time_str if tee_time_str else "-"
-            if linescores and len(linescores) >= 1:
-                latest = linescores[-1]
-                today_val = latest.get("displayValue", "-")
+            if current_round:
+                today_val = current_round.get("displayValue", "-")
                 if today_val and today_val != "-":
                     today = today_val
 
