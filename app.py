@@ -337,7 +337,29 @@ def fetch_leaderboard():
     except Exception as e:
         return None, f"Parse error: {e}", None
 
-    return golfers, event_name, None
+    # Compute projected cut line (PGA Championship = top 70 and ties after R2)
+    CUT_TOP_N = 70
+    active_scores = []
+    for g in golfers:
+        if g.get("status") in ("CUT", "MC", "WD", "DQ"):
+            continue
+        s = score_to_int(g["score"])
+        if s is not None:
+            active_scores.append(s)
+    active_scores.sort()
+
+    projected_cut = None
+    if len(active_scores) >= CUT_TOP_N:
+        projected_cut = active_scores[CUT_TOP_N - 1]
+        # Mark golfers projected to miss the cut
+        for g in golfers:
+            if g.get("status"):
+                continue
+            s = score_to_int(g["score"])
+            if s is not None and s > projected_cut:
+                g["proj_mc"] = True
+
+    return golfers, event_name, projected_cut
 
 
 # === LOAD ROSTERS ===
@@ -438,9 +460,15 @@ def main():
         st.error(f"Could not fetch leaderboard: {result[1] if result else 'Unknown error'}")
         st.info("The leaderboard will appear once tournament data is available from ESPN.")
         return
-    golfers_live, event_info, _ = result
+    golfers_live, event_info, projected_cut = result
 
-    st.caption(f"**{event_info}** | Updated: {datetime.now(timezone.utc).strftime('%I:%M %p UTC')} | Auto-refreshes every 3 min")
+    cut_str = ""
+    if projected_cut is not None:
+        cut_display = "E" if projected_cut == 0 else (f"+{projected_cut}" if projected_cut > 0 else str(projected_cut))
+        cut_count = sum(1 for g in golfers_live if not g.get("status") and score_to_int(g["score"]) is not None and score_to_int(g["score"]) <= projected_cut)
+        cut_str = f" | Projected cut: **{cut_display}** (top 70 + ties = {cut_count} golfers)"
+
+    st.caption(f"**{event_info}** | Updated: {datetime.now(timezone.utc).strftime('%I:%M %p UTC')} | Auto-refreshes every 3 min{cut_str}")
 
     df_scores, participant_details = compute_pool_scores(rosters, golfers_live)
 
@@ -480,6 +508,10 @@ def main():
 
     # TOURNAMENT LEADERBOARD + OWNERSHIP
     st.markdown("### ⛳ PGA Championship Leaderboard & Ownership (Full Field)")
+    if projected_cut is not None:
+        cut_display = "E" if projected_cut == 0 else (f"+{projected_cut}" if projected_cut > 0 else str(projected_cut))
+        over_display = "E" if projected_cut + 1 == 0 else (f"+{projected_cut + 1}" if projected_cut + 1 > 0 else str(projected_cut + 1))
+        st.caption(f"Projected cut: {cut_display} (top 70 + ties). Golfers at {over_display} or worse are projected to miss the cut and score 0 pool points.")
     top_golfers = sorted(golfers_live, key=lambda x: (x["pos_int"] if x["pos_int"] else 999))
 
     # Pre-build ownership counts (O(n) instead of O(n*m))
