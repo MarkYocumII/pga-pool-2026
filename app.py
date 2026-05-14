@@ -469,18 +469,27 @@ def main():
     # TOURNAMENT LEADERBOARD + OWNERSHIP
     st.markdown("### ⛳ PGA Championship Leaderboard & Ownership (Full Field)")
     top_golfers = sorted(golfers_live, key=lambda x: (x["pos_int"] if x["pos_int"] else 999))
+
+    # Pre-build ownership counts (O(n) instead of O(n*m))
+    ownership_exact = rosters.groupby("Golfer_Norm")["Participant"].nunique().to_dict()
+    roster_norms_by_participant = rosters.groupby("Participant")["Golfer_Norm"].apply(set).to_dict()
+
+    def count_owners(gn):
+        count = 0
+        gp = set(gn.split())
+        for participant, golfer_norms in roster_norms_by_participant.items():
+            for rn in golfer_norms:
+                if rn == gn or len(set(rn.split()) & gp) >= 2:
+                    count += 1
+                    break
+        return count
+
     combined_rows = []
     for g in top_golfers:
         gn = g["name_norm"]
-        count = 0
-        for _, r in rosters.iterrows():
-            if r["Golfer_Norm"] == gn:
-                count += 1
-                continue
-            rp = set(r["Golfer_Norm"].split())
-            gp = set(gn.split())
-            if len(rp & gp) >= 2:
-                count += 1
+        count = ownership_exact.get(gn, 0)
+        if count == 0:
+            count = count_owners(gn)
         combined_rows.append({
             "#": g["pos_int"] if g["pos_int"] else 999,
             "_proj_mc": g.get("proj_mc", False),
@@ -497,27 +506,27 @@ def main():
 
     # BEST VALUE PICKS
     st.markdown("### 💰 Best Value Picks (Points per Dollar)")
+    roster_price_lookup = rosters.drop_duplicates("Golfer_Norm").set_index("Golfer_Norm")["Price"].to_dict()
+    all_roster_norms = set(roster_price_lookup.keys())
     value_picks = []
     seen = set()
     for g in golfers_live:
         if g["points"] <= 0: continue
-        matches = rosters[rosters["Golfer_Norm"] == g["name_norm"]]
-        if matches.empty:
-            for _, r in rosters.iterrows():
-                rp = set(r["Golfer_Norm"].split())
-                gp = set(g["name_norm"].split())
-                if len(rp & gp) >= 2:
-                    matches = rosters[rosters["Golfer_Norm"] == r["Golfer_Norm"]]
+        gn = g["name_norm"]
+        price = roster_price_lookup.get(gn)
+        if price is None:
+            gp = set(gn.split())
+            for rn in all_roster_norms:
+                if len(set(rn.split()) & gp) >= 2:
+                    price = roster_price_lookup[rn]
                     break
-        if not matches.empty and g["name"] not in seen:
-            price = matches.iloc[0]["Price"]
-            if price > 0:
-                value_picks.append({
-                    "Golfer": g["name"], "Score": score_to_int(g["score"]),
-                    "Pool Pts": g["points"], "Price": f"${price:.2f}",
-                    "Pts/$": round(g["points"] / price, 1),
-                })
-                seen.add(g["name"])
+        if price and price > 0 and g["name"] not in seen:
+            value_picks.append({
+                "Golfer": g["name"], "Score": score_to_int(g["score"]),
+                "Pool Pts": g["points"], "Price": f"${price:.2f}",
+                "Pts/$": round(g["points"] / price, 1),
+            })
+            seen.add(g["name"])
     if value_picks:
         value_picks.sort(key=lambda x: x["Pts/$"], reverse=True)
         vp_df = force_numeric_cols(pd.DataFrame(value_picks[:12]))
