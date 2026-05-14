@@ -351,13 +351,14 @@ def fetch_leaderboard():
     projected_cut = None
     if len(active_scores) >= CUT_TOP_N:
         projected_cut = active_scores[CUT_TOP_N - 1]
-        # Mark golfers projected to miss the cut
+        # Mark golfers projected to miss the cut and zero their points
         for g in golfers:
             if g.get("status"):
                 continue
             s = score_to_int(g["score"])
             if s is not None and s > projected_cut:
                 g["proj_mc"] = True
+                g["points"] = 0
 
     return golfers, event_name, projected_cut
 
