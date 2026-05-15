@@ -234,7 +234,20 @@ def fetch_leaderboard():
         if not competitions:
             return None, f"No competitions in event: {event_name}", None
 
-        competitors = competitions[0].get("competitors", [])
+        comp_obj = competitions[0]
+        competitors = comp_obj.get("competitors", [])
+
+        # Pick the round to display as "Today" based on competition status.
+        # ESPN reports period N for "Round N in progress"; once round N finishes
+        # (type.completed=True / state="post"), advance to N+1 so Today shows
+        # the next round's tee times instead of yesterday's final score.
+        comp_status = comp_obj.get("status", {}) or {}
+        comp_status_type = comp_status.get("type", {}) or {}
+        status_period = comp_status.get("period", 1) or 1
+        if comp_status_type.get("completed") or comp_status_type.get("state") == "post":
+            target_period = status_period + 1
+        else:
+            target_period = status_period
 
         raw_golfers = []
         for idx, comp in enumerate(competitors):
@@ -252,11 +265,17 @@ def fetch_leaderboard():
             tee_time_str = ""
             linescores = comp.get("linescores", [])
 
-            # Current round = the latest round in linescores.
-            # ESPN adds a stub {"period": N} for the upcoming round before tee times
-            # are published, so this correctly flips to R2 the moment R1 finishes
-            # (instead of stuck showing R1's result as "today").
-            current_round = linescores[-1] if linescores else None
+            # Pick the linescores entry whose period == target_period.
+            # ESPN may include a stub for the round AFTER the current one
+            # (e.g. during R2 an empty R3 stub appears at linescores[-1]),
+            # so we can't just take the last entry — match by period.
+            current_round = None
+            for rd in linescores:
+                if rd.get("period") == target_period:
+                    current_round = rd
+                    break
+            if current_round is None and linescores:
+                current_round = linescores[-1]
 
             if current_round:
                 hole_scores = current_round.get("linescores", [])
