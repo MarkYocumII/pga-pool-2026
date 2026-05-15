@@ -252,16 +252,11 @@ def fetch_leaderboard():
             tee_time_str = ""
             linescores = comp.get("linescores", [])
 
-            # Find the active round (last round with actual holes played)
-            current_round = None
-            if linescores:
-                for rd in reversed(linescores):
-                    if rd.get("linescores", []):
-                        current_round = rd
-                        break
-                if current_round is None:
-                    # No holes played yet — use first round for tee time
-                    current_round = linescores[0]
+            # Current round = the latest round in linescores.
+            # ESPN adds a stub {"period": N} for the upcoming round before tee times
+            # are published, so this correctly flips to R2 the moment R1 finishes
+            # (instead of stuck showing R1's result as "today").
+            current_round = linescores[-1] if linescores else None
 
             if current_round:
                 hole_scores = current_round.get("linescores", [])
