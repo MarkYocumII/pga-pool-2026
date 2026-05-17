@@ -400,12 +400,21 @@ def load_rosters():
 
 
 # === LOAD MASTERS FINAL (for FedEx Cup combined standings) ===
+# Map Masters participant names -> PGA pool names where spelling differs
+MASTERS_TO_PGA_NAME = {
+    "Christy Heirgeist": "Christy Hiergeist",
+    "LJ Scurfield": "L.J. Scurfield",
+}
+
+
 @st.cache_data(ttl=3600)
 def load_masters_final():
     path = os.path.join(DIR, "masters_final.csv")
     if not os.path.exists(path):
         return None
-    return pd.read_csv(path, encoding="utf-8")
+    df = pd.read_csv(path, encoding="utf-8")
+    df["Participant"] = df["Participant"].replace(MASTERS_TO_PGA_NAME)
+    return df
 
 
 # === COMPUTE SCORES ===
@@ -623,17 +632,21 @@ def main():
         st.markdown("### 🏆 FedEx Cup Season Standings — Masters + PGA Championship 2026")
 
         pga_pts = df_scores.set_index("Participant")["Points"].to_dict()
+        masters_pts = dict(zip(masters_df["Participant"], masters_df["MastersPoints"]))
+        all_participants = set(masters_pts) | set(pga_pts)
+
         fedex_rows = []
-        for _, r in masters_df.iterrows():
-            p = r["Participant"]
-            mp = int(r["MastersPoints"])
+        for p in all_participants:
+            mp = masters_pts.get(p)
             pp = pga_pts.get(p)
-            if pp is None:
-                fedex_rows.append({"Participant": p, "Masters": mp, "PGA": None,
-                                   "Total": mp, "_sort": mp})
-            else:
-                fedex_rows.append({"Participant": p, "Masters": mp, "PGA": int(pp),
-                                   "Total": int(mp + pp), "_sort": int(mp + pp)})
+            total = (int(mp) if mp is not None else 0) + (int(pp) if pp is not None else 0)
+            fedex_rows.append({
+                "Participant": p,
+                "Masters": int(mp) if mp is not None else None,
+                "PGA": int(pp) if pp is not None else None,
+                "Total": total,
+                "_sort": total,
+            })
 
         fedex_df = pd.DataFrame(fedex_rows).sort_values("_sort", ascending=False).drop(columns="_sort").reset_index(drop=True)
 
@@ -653,15 +666,15 @@ def main():
             i = j
         fedex_df.insert(0, "Rank", ranks)
         fedex_df["PGA"] = fedex_df["PGA"].astype("Int64")
+        fedex_df["Masters"] = fedex_df["Masters"].astype("Int64")
 
         st.dataframe(
             fedex_df, use_container_width=True, hide_index=True,
             height=min(700, 35 * len(fedex_df) + 38),
         )
         st.caption(
-            "⚠️ Source: Masters Pool final standings (top 14 only from afranz@haverford.org email, May 17) "
-            "+ PGA Championship Pool live. Participants outside the Masters top 14 are not yet included — "
-            "send the full Masters final standings to complete this leaderboard."
+            "Combined points across the 2026 Masters (final) and PGA Championship (live). "
+            "Participants who only played one of the two tournaments show a dash in the missing column."
         )
 
     st.markdown("---")
