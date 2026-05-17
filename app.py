@@ -399,6 +399,15 @@ def load_rosters():
     return df
 
 
+# === LOAD MASTERS FINAL (for FedEx Cup combined standings) ===
+@st.cache_data(ttl=3600)
+def load_masters_final():
+    path = os.path.join(DIR, "masters_final.csv")
+    if not os.path.exists(path):
+        return None
+    return pd.read_csv(path, encoding="utf-8")
+
+
 # === COMPUTE SCORES ===
 def compute_pool_scores(rosters, golfers_live):
     live_lookup = {g["name_norm"]: g for g in golfers_live}
@@ -604,6 +613,56 @@ def main():
         value_picks.sort(key=lambda x: x["Pts/$"], reverse=True)
         vp_df = force_numeric_cols(pd.DataFrame(value_picks[:12]))
         golf_dataframe(vp_df, use_container_width=True, hide_index=True)
+
+    # ============================================
+    # FEDEX CUP STANDINGS (Masters + PGA combined)
+    # ============================================
+    masters_df = load_masters_final()
+    if masters_df is not None:
+        st.markdown("---")
+        st.markdown("### 🏆 FedEx Cup Season Standings — Masters + PGA Championship 2026")
+
+        pga_pts = df_scores.set_index("Participant")["Points"].to_dict()
+        fedex_rows = []
+        for _, r in masters_df.iterrows():
+            p = r["Participant"]
+            mp = int(r["MastersPoints"])
+            pp = pga_pts.get(p)
+            if pp is None:
+                fedex_rows.append({"Participant": p, "Masters": mp, "PGA": None,
+                                   "Total": mp, "_sort": mp})
+            else:
+                fedex_rows.append({"Participant": p, "Masters": mp, "PGA": int(pp),
+                                   "Total": int(mp + pp), "_sort": int(mp + pp)})
+
+        fedex_df = pd.DataFrame(fedex_rows).sort_values("_sort", ascending=False).drop(columns="_sort").reset_index(drop=True)
+
+        # Tied ranks
+        ranks = []
+        pos = 1
+        i = 0
+        tot_list = fedex_df["Total"].tolist()
+        while i < len(tot_list):
+            j = i
+            while j < len(tot_list) and tot_list[j] == tot_list[i]:
+                j += 1
+            tied = j - i > 1
+            for k in range(i, j):
+                ranks.append(f"T{pos}" if tied else str(pos))
+            pos = j + 1
+            i = j
+        fedex_df.insert(0, "Rank", ranks)
+        fedex_df["PGA"] = fedex_df["PGA"].astype("Int64")
+
+        st.dataframe(
+            fedex_df, use_container_width=True, hide_index=True,
+            height=min(700, 35 * len(fedex_df) + 38),
+        )
+        st.caption(
+            "⚠️ Source: Masters Pool final standings (top 14 only from afranz@haverford.org email, May 17) "
+            "+ PGA Championship Pool live. Participants outside the Masters top 14 are not yet included — "
+            "send the full Masters final standings to complete this leaderboard."
+        )
 
     st.markdown("---")
     st.caption("PGA Championship Pool 2026 | Scoring: W=90, 2nd=65, 3rd=60, 4th=55, 5th=50, 6-10=45-25, 11-15=20, 16-20=15, 21-25=10, 26-30=5, 31+=2, MC=0")
