@@ -265,6 +265,15 @@ def fetch_leaderboard():
             tee_time_str = ""
             linescores = comp.get("linescores", [])
 
+            # PGA Championship: ESPN does NOT flag missed-cut golfers with a status.
+            # Detect MC ourselves from linescores structure: in R3+, anyone who
+            # made the cut has a linescores entry for period >= 3. Anyone without
+            # one missed the cut.
+            if status is None and target_period >= 3:
+                has_post_cut_round = any(rd.get("period", 0) >= 3 for rd in linescores)
+                if not has_post_cut_round:
+                    status = "MC"
+
             # Pick the linescores entry whose period == target_period.
             # ESPN may include a stub for the round AFTER the current one
             # (e.g. during R2 an empty R3 stub appears at linescores[-1]),
@@ -351,28 +360,33 @@ def fetch_leaderboard():
     except Exception as e:
         return None, f"Parse error: {e}", None
 
-    # Compute projected cut line (PGA Championship = top 70 and ties after R2)
+    # Projected cut line — only meaningful before R3 starts.
+    # Once we're in R3+, the cut is locked: any golfer still showing as active
+    # in ESPN's feed (and not MC-flagged via our linescores check above) HAS
+    # made the cut and must earn at least their position-based points
+    # (minimum 2 for any finish 31st or worse).
     CUT_TOP_N = 70
-    active_scores = []
-    for g in golfers:
-        if g.get("status") in ("CUT", "MC", "WD", "DQ"):
-            continue
-        s = score_to_int(g["score"])
-        if s is not None:
-            active_scores.append(s)
-    active_scores.sort()
-
     projected_cut = None
-    if len(active_scores) >= CUT_TOP_N:
-        projected_cut = active_scores[CUT_TOP_N - 1]
-        # Mark golfers projected to miss the cut and zero their points
+    if target_period <= 2:
+        active_scores = []
         for g in golfers:
-            if g.get("status"):
+            if g.get("status") in ("CUT", "MC", "WD", "DQ"):
                 continue
             s = score_to_int(g["score"])
-            if s is not None and s > projected_cut:
-                g["proj_mc"] = True
-                g["points"] = 0
+            if s is not None:
+                active_scores.append(s)
+        active_scores.sort()
+
+        if len(active_scores) >= CUT_TOP_N:
+            projected_cut = active_scores[CUT_TOP_N - 1]
+            # Mark golfers projected to miss the cut and zero their points
+            for g in golfers:
+                if g.get("status"):
+                    continue
+                s = score_to_int(g["score"])
+                if s is not None and s > projected_cut:
+                    g["proj_mc"] = True
+                    g["points"] = 0
 
     return golfers, event_name, projected_cut
 
